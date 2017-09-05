@@ -9,19 +9,25 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
+	"github.com/BixData/binaryxml"
 	"github.com/docopt/docopt-go"
 	"github.com/spf13/viper"
 )
 
 type Tee struct {
-	File       *os.File
+	BinaryXml  bool
 	Connection net.Conn
+	File       *os.File
+	Id         string
 	PassThru   bool
 }
 
 func horizontalRule(title string) string {
-	result := "----- " + title + " " + strings.Repeat("-", 73-len(title))
+	now := time.Now().String()
+	newTitle := fmt.Sprintf("%s %s", now, title)
+	result := "----- " + newTitle + " " + strings.Repeat("-", 73-len(newTitle))
 	return result
 }
 
@@ -59,7 +65,7 @@ func loadConfig(args map[string]interface{}) {
 // One-way proxy from inbound to outbound.
 // 'prefix' and network message are written to 'outFile'.
 // 'passThru' is used to control whether or not to send message to outbound.
-func proxy(ctx context.Context, inbound net.Conn, outbound net.Conn, outFile *os.File, prefix string, passThru bool) {
+func proxy(ctx context.Context, tee Tee, outbound net.Conn, prefix string) {
 	byteBuffer := make([]byte, 1024)
 
 	// Read-write loop.
@@ -68,21 +74,33 @@ func proxy(ctx context.Context, inbound net.Conn, outbound net.Conn, outFile *os
 
 		// Read the inbound network connection.
 
-		numberOfBytesRead, err := inbound.Read(byteBuffer)
+		numberOfBytesRead, err := tee.Connection.Read(byteBuffer)
 		if err != nil {
 			log.Println("Proxy Read return")
 			return
 		}
 		message := byteBuffer[0:numberOfBytesRead]
 
+		// Construct output string for logging.
+
+		outString := string(message)
+		if viper.GetBool("binaryxml") {
+			xml, err := binaryxml.ToXML(message)
+			if err == nil {
+				outString = xml
+			} else {
+				fmt.Printf("%s: %+v\n", tee.Id, err)
+			}
+		}
+
 		// Log message to file.
 
-		outline := fmt.Sprintf("%s\n%s\n\n", horizontalRule(prefix), string(message))
-		_, _ = outFile.WriteString(outline)
+		outline := fmt.Sprintf("%s\n%s\n\n", horizontalRule(prefix), outString)
+		_, _ = tee.File.WriteString(outline)
 
 		// Write to outbound network connection.
 
-		if passThru {
+		if tee.PassThru {
 			_, err = outbound.Write([]byte(message))
 			if err != nil {
 				log.Println("Proxy Write return")
@@ -107,11 +125,24 @@ func proxyTee(ctx context.Context, inbound net.Conn, tees []Tee, prefix string) 
 			log.Println("Proxy Read return")
 			return
 		}
+
 		message := byteBuffer[0:numberOfBytesRead]
+
+		// Construct output string for logging.
+
+		outString := string(message)
+		if viper.GetBool("binaryxml") {
+			xml, err := binaryxml.ToXML(message)
+			if err == nil {
+				outString = xml
+			} else {
+				fmt.Println(err)
+			}
+		}
 
 		// Construct the message for logging.
 
-		outline := fmt.Sprintf("%s\n%s\n\n", horizontalRule(prefix), string(message))
+		outline := fmt.Sprintf("%s\n%s\n\n", horizontalRule(prefix), outString)
 
 		// Process each tee as outbound.
 
@@ -142,6 +173,7 @@ Usage:
 Options:
    -h, --help
    --configPath=<configuration_path>   Path to go-proxy-tee.json configuration file
+   --binaryxml                         Treat network traffic as binary XML
    --debug                             Log debugging messages
 
 Where:
@@ -235,8 +267,10 @@ Where:
 		// Add to tees.
 
 		tee := Tee{
+			BinaryXml:  viper.GetBool("binaryxml"),
 			Connection: outboundConnection,
 			File:       outboundFile,
+			Id:         "outbound",
 			PassThru:   true,
 		}
 
@@ -272,8 +306,10 @@ Where:
 			// Add to tees.
 
 			tee := Tee{
+				BinaryXml:  viper.GetBool("binaryxml"),
 				Connection: teeConnection,
 				File:       teeFile,
+				Id:         key,
 			}
 			tees = append(tees, tee)
 		}
@@ -282,7 +318,7 @@ Where:
 
 		go proxyTee(ctx, inboundConnection, tees, "Client request")
 		for _, tee := range tees {
-			go proxy(ctx, tee.Connection, inboundConnection, tee.File, "Server response", tee.PassThru)
+			go proxy(ctx, tee, inboundConnection, "Server response")
 		}
 	}
 }

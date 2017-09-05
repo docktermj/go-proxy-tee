@@ -61,6 +61,8 @@ ENV GO_PACKAGE="github.com/docktermj/${PROGRAM_NAME}"
 # Install dependencies.
 RUN go get github.com/docopt/docopt-go
 RUN go get github.com/spf13/viper
+RUN go get github.com/BixData/binaryxml
+RUN go get github.com/jnewmoyer/xmlpath
 
 # Copy local files from the Git repository.
 COPY . ${GOPATH}/src/${GO_PACKAGE}
