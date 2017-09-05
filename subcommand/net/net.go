@@ -21,14 +21,17 @@ type Tee struct {
 
 // Load configuration file.
 func loadConfig(args map[string]interface{}) {
-	// FIXME: Add support for --configuration command-line option.
-	// FIXME: Add support for --debug command-line option.
 
 	// Set configuration file path.
 
 	viper.SetConfigName("go-proxy-tee") // name of config file (without extension)
 
 	// Add path of where the configuration file may be found. Order is important.  First defined; first used.
+
+	value := args["--configPath"]
+	if value != nil {
+		viper.AddConfigPath(value.(string))
+	}
 
 	viper.AddConfigPath(".")
 	viper.AddConfigPath("$HOME/go/src/github.com/docktermj/go-proxy-tee/")
@@ -40,6 +43,10 @@ func loadConfig(args map[string]interface{}) {
 	err := viper.ReadInConfig() // Find and read the config file
 	if err != nil {             // Handle errors reading the config file
 		panic(fmt.Errorf("Fatal error config file: %s \n", err))
+	}
+
+	if _, ok := args["--debug"]; ok {
+		viper.Set("debug", true)
 	}
 }
 
@@ -128,11 +135,11 @@ Usage:
 
 Options:
    -h, --help
-   --configuration=<configuration_file>   Path to configuration file. (Not implemented yet)
-   --debug                                Log debugging messages (Not implemented yet)
+   --configPath=<configuration_path>   Path to go-proxy-tee.json configuration file
+   --debug                             Log debugging messages
 
 Where:
-   configuration_file   Example: '/tmp/go-proxy-tee.json'
+   configuration_path   Example: '/path/to/configuration'
 `
 
 	// DocOpt processing.

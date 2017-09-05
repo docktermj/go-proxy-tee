@@ -23,7 +23,7 @@ Usage:
     go-proxy-tee [--version] [--help] <command> [<args>...]
 
 Options:
-    -h, --help
+    -h, --help      Show help menu
 
 The commands are:
     net    Relay through different types of networks
