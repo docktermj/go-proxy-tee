@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/docopt/docopt-go"
@@ -17,6 +18,11 @@ type Tee struct {
 	File       *os.File
 	Connection net.Conn
 	PassThru   bool
+}
+
+func horizontalRule(title string) string {
+	result := "----- " + title + " " + strings.Repeat("-", 73-len(title))
+	return result
 }
 
 // Load configuration file.
@@ -71,7 +77,7 @@ func proxy(ctx context.Context, inbound net.Conn, outbound net.Conn, outFile *os
 
 		// Log message to file.
 
-		outline := fmt.Sprintf("%s: %s\n\n", prefix, string(message))
+		outline := fmt.Sprintf("%s\n%s\n\n", horizontalRule(prefix), string(message))
 		_, _ = outFile.WriteString(outline)
 
 		// Write to outbound network connection.
@@ -105,7 +111,7 @@ func proxyTee(ctx context.Context, inbound net.Conn, tees []Tee, prefix string) 
 
 		// Construct the message for logging.
 
-		outline := fmt.Sprintf("%s: %s\n\n", prefix, string(message))
+		outline := fmt.Sprintf("%s\n%s\n\n", horizontalRule(prefix), string(message))
 
 		// Process each tee as outbound.
 
@@ -274,9 +280,9 @@ Where:
 
 		// Asynchronously handle bi-directional traffic.
 
-		go proxyTee(ctx, inboundConnection, tees, "Receive")
+		go proxyTee(ctx, inboundConnection, tees, "Client request")
 		for _, tee := range tees {
-			go proxy(ctx, tee.Connection, inboundConnection, tee.File, "Respond", tee.PassThru)
+			go proxy(ctx, tee.Connection, inboundConnection, tee.File, "Server response", tee.PassThru)
 		}
 	}
 }
