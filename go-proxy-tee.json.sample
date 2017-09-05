@@ -1,0 +1,24 @@
+{
+	"debug": true,
+	"inbound": {
+		"network": "tcp",
+		"address": "127.0.0.1:11112"
+	},
+	"outbound": {
+		"network": "tcp",
+		"address": "127.0.0.1:11113",
+		"output": "/tmp/primary.out"
+	},
+	"tee": {
+		"bob": {
+			"network": "tcp",
+			"address": "127.0.0.1:11114",
+			"output": "/tmp/bob.out"
+		},
+		"mary": {
+			"network": "tcp",
+			"address": "127.0.0.1:11115",
+			"output": "/tmp/mary.out"
+		}
+	}
+}
