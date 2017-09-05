@@ -66,6 +66,8 @@ docker-run:
 .PHONY: dependencies
 dependencies:
 	go get -u github.com/jstemmer/go-junit-report
+	go get -u github.com/docopt/docopt-go
+	go get -u github.com/spf13/viper	
 
 
 .PHONY: clean

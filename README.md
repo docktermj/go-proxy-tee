@@ -1,19 +1,17 @@
-# mock-proxy
+# go-proxy-tee
 
-Build `mock-proxy-M.m.P-I.x86_64.rpm`
-and   `mock-proxy_M.m.P-I_amd64.deb`
+Build `go-proxy-tee-M.m.P-I.x86_64.rpm`
+and   `go-proxy-tee_M.m.P-I_amd64.deb`
 where "M.m.P-I" is Major.minor.Patch-Iteration.
 
 ## Usage
 
-That acts as a proxy.
-
-It is a server of requests, and forwards them as if it's a client.
+A proxy the acts like Linux's `tee` command, but for network traffic.
 
 ### Invocation
 
 ```console
-mock-proxy net --inbound-network <network_type> --inbound-address <inboundAddress> --outbound-network <network_type>  --outbound-address <outboundAddress>
+go-proxy-tee net
 ```
 
 ## Development
@@ -82,7 +80,7 @@ Example distributions: openSUSE, Fedora, CentOS, Mandrake
 Example:
 
 ```console
-sudo rpm -ivh mock-proxy-M.m.P-I.x86_64.rpm
+sudo rpm -ivh go-proxy-tee-M.m.P-I.x86_64.rpm
 ```
 
 ##### RPM Update
@@ -90,7 +88,7 @@ sudo rpm -ivh mock-proxy-M.m.P-I.x86_64.rpm
 Example: 
 
 ```console
-sudo rpm -Uvh mock-proxy-M.m.P-I.x86_64.rpm
+sudo rpm -Uvh go-proxy-tee-M.m.P-I.x86_64.rpm
 ```
 
 #### Debian
@@ -102,7 +100,7 @@ Example distributions: Ubuntu
 Example:
 
 ```console
-sudo dpkg -i mock-proxy_M.m.P-I_amd64.deb
+sudo dpkg -i go-proxy-tee_M.m.P-I_amd64.deb
 ```
 
 ### Cleanup
