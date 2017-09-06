@@ -11,7 +11,7 @@ A proxy the acts like Linux's `tee` command, but for network traffic.
 ### Configuration
 
 Copy 
-[go-proxy-tee.json.sample](go-proxy-tee.json-sample) 
+[go-proxy-tee.json.sample](https://github.com/docktermj/go-proxy-tee/blob/master/go-proxy-tee.json.sample) 
 to `go-proxy-tee.json` 
 in one of the following places:
 - `./go-proxy-tee.json`  for "directory-specific" invocation
