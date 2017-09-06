@@ -1,8 +1,9 @@
 package net
 
 import (
-	"bufio"
+	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net"
@@ -18,11 +19,13 @@ import (
 )
 
 const (
-	BINARY_XML = "binaryxml"
+	FORMAT            = "format"
+	FORMAT_BINARY_XML = "binaryxml"
+	FORMAT_HEX        = "hex"
+	FORMAT_STRING     = "string"
 )
 
 type Tee struct {
-	BinaryXml  bool
 	Connection net.Conn
 	File       *os.File
 	Id         string
@@ -32,7 +35,7 @@ type Tee struct {
 func horizontalRule(title string) string {
 	now := time.Now().String()
 	newTitle := fmt.Sprintf("%s %s", now, title)
-	result := "----- " + newTitle + " " + strings.Repeat("-", 73-len(newTitle))
+	result := "-------- " + newTitle + " " + strings.Repeat("-", 68-len(newTitle))
 	return result
 }
 
@@ -43,12 +46,16 @@ func loadConfig(args map[string]interface{}) {
 
 	viper.SetConfigName("go-proxy-tee") // name of config file (without extension)
 
-	// Add path of where the configuration file may be found. Order is important.  First defined; first used.
+	// Add paths of where the configuration file may be found. Order is important.  First defined; first used.
 
-	value := args["--configPath"]
-	if value != nil {
-		viper.AddConfigPath(value.(string))
+	// Command-line option takes top precedence.
+
+	configPathParameter := args["--configPath"]
+	if configPathParameter != nil {
+		viper.AddConfigPath(configPathParameter.(string))
 	}
+
+	// Other paths in precedence order.
 
 	viper.AddConfigPath(".")
 	viper.AddConfigPath("$HOME/go/src/github.com/docktermj/go-proxy-tee/")
@@ -62,52 +69,71 @@ func loadConfig(args map[string]interface{}) {
 		panic(fmt.Errorf("Fatal error config file: %s \n", err))
 	}
 
-	if _, ok := args["--debug"]; ok {
+	// Command-line options override configuration file.
+
+	debugParameter := args["--debug"]
+	if debugParameter.(bool) {
 		viper.Set("debug", true)
 	}
+
+	formatParameter := args["--format"]
+	if formatParameter != nil {
+		var format string
+		switch strings.ToLower(formatParameter.(string)) {
+		case FORMAT_STRING:
+			format = FORMAT_STRING
+		case FORMAT_HEX:
+			format = FORMAT_HEX
+		case FORMAT_BINARY_XML:
+			format = FORMAT_BINARY_XML
+		default:
+			format = FORMAT_STRING
+		}
+		viper.Set(FORMAT, format)
+	}
+
 }
 
-// One-way proxy from inbound to outbound.
+// One-way proxy from inbound (tee) to outbound.
 // 'prefix' and network message are written to 'outFile'.
-// 'passThru' is used to control whether or not to send message to outbound.
 func proxy(ctx context.Context, tee Tee, outbound net.Conn, prefix string) {
-	byteBuffer := make([]byte, 1024)
-	isBinaryXml := viper.GetBool(BINARY_XML)
+	byteBuffer := make([]byte, 4096)
 
 	// Read-write loop.
 
 	for {
-		var message []byte
-		var param uint8
 
 		// Read the inbound network connection.
 
-		switch {
-		case isBinaryXml:
-			reader := bufio.NewReader(tee.Connection)
-			err := binaryxml.ReadMessage(reader, &param, &message)
-			if err != nil {
-				fmt.Printf("1) %s: %+v\n", tee.Id, err)
-			}
-		default:
-			numberOfBytesRead, err := tee.Connection.Read(byteBuffer)
-			if err != nil {
-				log.Println("Proxy Read return")
-				return
-			}
-			message = byteBuffer[0:numberOfBytesRead]
+		numberOfBytesRead, err := tee.Connection.Read(byteBuffer)
+		if err != nil {
+			log.Println("Proxy Read return")
+			return
 		}
+		message := byteBuffer[0:numberOfBytesRead]
 
 		// Construct output string for logging.
 
-		outString := string(message)
-		if isBinaryXml {
-			xml, err := binaryxml.ToXML(message)
-			if err == nil {
-				outString = xml
-			} else {
-				fmt.Printf("2) %s(%+v): %s\n", tee.Id, err, xml)
+		var outString string
+		switch viper.Get(FORMAT) {
+		case FORMAT_STRING:
+			outString = string(message)
+		case FORMAT_HEX:
+			outString = hex.Dump(message)
+		case FORMAT_BINARY_XML:
+			reader := bytes.NewReader(message)
+			var param uint8
+			xmlBuffer := make([]byte, 4096)
+			err := binaryxml.ReadMessage(reader, &param, &xmlBuffer)
+			if err != nil {
+				fmt.Printf("binaryxml.ReadMessage() failed. Err: %+v\n", err)
 			}
+			outString, err = binaryxml.ToXML(xmlBuffer)
+			if err != nil {
+				fmt.Printf("binaryxml.ToXML() failed. Err: %+v\n", err)
+			}
+		default:
+			outString = string(message)
 		}
 
 		// Log message to file.
@@ -115,7 +141,7 @@ func proxy(ctx context.Context, tee Tee, outbound net.Conn, prefix string) {
 		outline := fmt.Sprintf("%s\n%s\n\n", horizontalRule(prefix), outString)
 		_, _ = tee.File.WriteString(outline)
 
-		// Write to outbound network connection.
+		// If PassThru, write to outbound network connection.
 
 		if tee.PassThru {
 			_, err := outbound.Write([]byte(message))
@@ -129,40 +155,43 @@ func proxy(ctx context.Context, tee Tee, outbound net.Conn, prefix string) {
 
 // One-way proxy from inbound to multiple outbounds via 'tees'
 func proxyTee(ctx context.Context, inbound net.Conn, tees []Tee, prefix string) {
-	byteBuffer := make([]byte, 1024)
-	isBinaryXml := viper.GetBool(BINARY_XML)
+	byteBuffer := make([]byte, 4096)
 
 	// Read-write loop.
 
 	for {
-		var message []byte
-		var param uint8
 
 		// Read the inbound network connection.
 
-		switch {
-		case isBinaryXml:
-			reader := bufio.NewReader(inbound)
-			binaryxml.ReadMessage(reader, &param, &message)
-		default:
-			numberOfBytesRead, err := inbound.Read(byteBuffer)
-			if err != nil {
-				log.Println("Proxy Read return")
-				return
-			}
-			message = byteBuffer[0:numberOfBytesRead]
+		numberOfBytesRead, err := inbound.Read(byteBuffer)
+		if err != nil {
+			log.Println("Proxy Read return")
+			return
 		}
+		message := byteBuffer[0:numberOfBytesRead]
 
 		// Construct output string for logging.
 
-		outString := string(message)
-		if isBinaryXml {
-			xml, err := binaryxml.ToXML(message)
-			if err == nil {
-				outString = xml
-			} else {
-				fmt.Printf("Inbound(%+v): %s\n", err, xml)
+		var outString string
+		switch viper.Get(FORMAT) {
+		case FORMAT_STRING:
+			outString = string(message)
+		case FORMAT_HEX:
+			outString = hex.Dump(message)
+		case FORMAT_BINARY_XML:
+			reader := bytes.NewReader(message)
+			var param uint8
+			xmlBuffer := make([]byte, 4096)
+			err := binaryxml.ReadMessage(reader, &param, &xmlBuffer)
+			if err != nil {
+				fmt.Printf("binaryxml.ReadMessage() failed. Err: %+v\n", err)
 			}
+			outString, err = binaryxml.ToXML(xmlBuffer)
+			if err != nil {
+				fmt.Printf("binaryxml.ToXML() failed. Err: %+v\n", err)
+			}
+		default:
+			outString = string(message)
 		}
 
 		// Construct the message for logging.
@@ -197,12 +226,13 @@ Usage:
 
 Options:
    -h, --help
-   --configPath=<configuration_path>   Path to go-proxy-tee.json configuration file
-   --binaryxml                         Treat network traffic as binary XML
+   --configPath=<configuration_path>   Directory of go-proxy-tee.json configuration file
+   --format=<format>                   Output format.
    --debug                             Log debugging messages
 
 Where:
    configuration_path   Example: '/path/to/configuration'
+   format               Example: 'string', 'hex', 'binaryxml'  Default: string.
 `
 
 	// DocOpt processing.
@@ -223,16 +253,17 @@ Where:
 	// Debugging information.
 
 	if isDebug {
-		log.Printf("Listening on '%s' network with address '%s'", inboundNetwork, inboundAddress)
-		log.Printf("Communicating with '%s' network with address '%s' into file '%s'", outboundNetwork, outboundAddress, outboundOutput)
+		log.Printf("Listening on '%s' network with address '%s'\n", inboundNetwork, inboundAddress)
+		log.Printf("Communicating with '%s' network with address '%s' into file '%s'\n", outboundNetwork, outboundAddress, outboundOutput)
 		teeDefinitions := viper.GetStringMap("tee")
 		for key, _ := range teeDefinitions {
 			teeDefinition := teeDefinitions[key].(map[string]interface{})
 			teeNetwork := teeDefinition["network"].(string)
 			teeAddress := teeDefinition["address"].(string)
 			teeOutput := teeDefinition["output"].(string)
-			log.Printf("Tee-ing to '%s' network with address '%s' into file '%s'", teeNetwork, teeAddress, teeOutput)
+			log.Printf("Tee-ing to '%s' network with address '%s' into file '%s'\n", teeNetwork, teeAddress, teeOutput)
 		}
+		log.Printf("Formatting output as '%s'\n", viper.GetString(FORMAT))
 	}
 
 	// Create context.
@@ -289,16 +320,14 @@ Where:
 		}
 		defer outboundConnection.Close()
 
-		// Add to tees.
+		// Add "outbound" to tees with PassThru=true.
 
 		tee := Tee{
-			BinaryXml:  viper.GetBool("binaryxml"),
 			Connection: outboundConnection,
 			File:       outboundFile,
 			Id:         "outbound",
 			PassThru:   true,
 		}
-
 		tees = append(tees, tee)
 
 		// Add tees from configuration file.
@@ -331,7 +360,6 @@ Where:
 			// Add to tees.
 
 			tee := Tee{
-				BinaryXml:  viper.GetBool("binaryxml"),
 				Connection: teeConnection,
 				File:       teeFile,
 				Id:         key,
