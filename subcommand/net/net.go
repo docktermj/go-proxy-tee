@@ -1,6 +1,7 @@
 package net
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log"
@@ -14,6 +15,10 @@ import (
 	"github.com/BixData/binaryxml"
 	"github.com/docopt/docopt-go"
 	"github.com/spf13/viper"
+)
+
+const (
+	BINARY_XML = "binaryxml"
 )
 
 type Tee struct {
@@ -67,29 +72,41 @@ func loadConfig(args map[string]interface{}) {
 // 'passThru' is used to control whether or not to send message to outbound.
 func proxy(ctx context.Context, tee Tee, outbound net.Conn, prefix string) {
 	byteBuffer := make([]byte, 1024)
+	isBinaryXml := viper.GetBool(BINARY_XML)
 
 	// Read-write loop.
 
 	for {
+		var message []byte
+		var param uint8
 
 		// Read the inbound network connection.
 
-		numberOfBytesRead, err := tee.Connection.Read(byteBuffer)
-		if err != nil {
-			log.Println("Proxy Read return")
-			return
+		switch {
+		case isBinaryXml:
+			reader := bufio.NewReader(tee.Connection)
+			err := binaryxml.ReadMessage(reader, &param, &message)
+			if err != nil {
+				fmt.Printf("1) %s: %+v\n", tee.Id, err)
+			}
+		default:
+			numberOfBytesRead, err := tee.Connection.Read(byteBuffer)
+			if err != nil {
+				log.Println("Proxy Read return")
+				return
+			}
+			message = byteBuffer[0:numberOfBytesRead]
 		}
-		message := byteBuffer[0:numberOfBytesRead]
 
 		// Construct output string for logging.
 
 		outString := string(message)
-		if viper.GetBool("binaryxml") {
+		if isBinaryXml {
 			xml, err := binaryxml.ToXML(message)
 			if err == nil {
 				outString = xml
 			} else {
-				fmt.Printf("%s: %+v\n", tee.Id, err)
+				fmt.Printf("2) %s(%+v): %s\n", tee.Id, err, xml)
 			}
 		}
 
@@ -101,7 +118,7 @@ func proxy(ctx context.Context, tee Tee, outbound net.Conn, prefix string) {
 		// Write to outbound network connection.
 
 		if tee.PassThru {
-			_, err = outbound.Write([]byte(message))
+			_, err := outbound.Write([]byte(message))
 			if err != nil {
 				log.Println("Proxy Write return")
 				return
@@ -113,30 +130,38 @@ func proxy(ctx context.Context, tee Tee, outbound net.Conn, prefix string) {
 // One-way proxy from inbound to multiple outbounds via 'tees'
 func proxyTee(ctx context.Context, inbound net.Conn, tees []Tee, prefix string) {
 	byteBuffer := make([]byte, 1024)
+	isBinaryXml := viper.GetBool(BINARY_XML)
 
 	// Read-write loop.
 
 	for {
+		var message []byte
+		var param uint8
 
 		// Read the inbound network connection.
 
-		numberOfBytesRead, err := inbound.Read(byteBuffer)
-		if err != nil {
-			log.Println("Proxy Read return")
-			return
+		switch {
+		case isBinaryXml:
+			reader := bufio.NewReader(inbound)
+			binaryxml.ReadMessage(reader, &param, &message)
+		default:
+			numberOfBytesRead, err := inbound.Read(byteBuffer)
+			if err != nil {
+				log.Println("Proxy Read return")
+				return
+			}
+			message = byteBuffer[0:numberOfBytesRead]
 		}
-
-		message := byteBuffer[0:numberOfBytesRead]
 
 		// Construct output string for logging.
 
 		outString := string(message)
-		if viper.GetBool("binaryxml") {
+		if isBinaryXml {
 			xml, err := binaryxml.ToXML(message)
 			if err == nil {
 				outString = xml
 			} else {
-				fmt.Println(err)
+				fmt.Printf("Inbound(%+v): %s\n", err, xml)
 			}
 		}
 
@@ -154,7 +179,7 @@ func proxyTee(ctx context.Context, inbound net.Conn, tees []Tee, prefix string) 
 
 			// Write to tee's outbound network connection.
 
-			_, err = tee.Connection.Write([]byte(message))
+			_, err := tee.Connection.Write([]byte(message))
 			if err != nil {
 				log.Println("Proxy Write return")
 				return
