@@ -1,6 +1,6 @@
 {
 	"debug": true,
-	"binaryxml": true,
+	"format": "hex",
 	"inbound": {
 		"network": "tcp",
 		"address": "127.0.0.1:11112"
