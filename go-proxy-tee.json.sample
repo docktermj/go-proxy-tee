@@ -3,23 +3,24 @@
 	"format": "hex",
 	"inbound": {
 		"network": "tcp",
-		"address": "127.0.0.1:11112"
+		"address": "127.0.0.1:11112",
+		"output": "/tmp/client.txt"
 	},
 	"outbound": {
 		"network": "tcp",
 		"address": "127.0.0.1:11113",
-		"output": "/tmp/primary.out"
+		"output": "/tmp/server-1.txt"
 	},
 	"tee": {
-		"bob": {
+		"server-2": {
 			"network": "tcp",
 			"address": "127.0.0.1:11114",
-			"output": "/tmp/bob.out"
+			"output": "/tmp/server-2.txt"
 		},
-		"mary": {
+		"server-3": {
 			"network": "tcp",
 			"address": "127.0.0.1:11115",
-			"output": "/tmp/mary.out"
+			"output": "/tmp/server-3.txt"
 		}
 	}
 }
