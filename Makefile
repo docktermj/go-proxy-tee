@@ -70,6 +70,7 @@ dependencies:
 	go get -u github.com/spf13/viper
 	go get -u github.com/BixData/binaryxml
 	go get -u github.com/jnewmoyer/xmlpath
+	go get -u github.com/go-xmlfmt/xmlfmt
 
 
 .PHONY: clean

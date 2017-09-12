@@ -3,8 +3,11 @@ package net
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
+	"encoding/xml"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -19,10 +22,38 @@ import (
 )
 
 const (
-	FORMAT            = "format"
-	FORMAT_BINARY_XML = "binaryxml"
-	FORMAT_HEX        = "hex"
-	FORMAT_STRING     = "string"
+
+	// Lengths in XML.
+
+	BINARY_XML_LENGTH_BEGIN_TOKEN = 1
+	BINARY_XML_LENGTH_LENGTH      = 4
+	BINARY_XML_LENGTH_PARAM       = 1
+	BINARY_XML_LENGTH_END_TOKEN   = 1
+	BINARY_XML_LENGTH_CRC         = 4
+
+	BINARY_XML_LENGTHS = BINARY_XML_LENGTH_BEGIN_TOKEN +
+		BINARY_XML_LENGTH_LENGTH +
+		BINARY_XML_LENGTH_PARAM +
+		BINARY_XML_LENGTH_END_TOKEN +
+		BINARY_XML_LENGTH_CRC
+
+		// Sentinals in XML.
+
+	BINARY_XML_START        uint8 = 121
+	BINARY_XML_TABLE_BEGIN  uint8 = 124
+	BINARY_XML_TABLE_END    uint8 = 125
+	BINARY_XML_SERIAL_BEGIN uint8 = 126
+	BINARY_XML_SERIAL_END   uint8 = 127
+	BINARY_XML_STOP         uint8 = 123
+
+	// Acceptable output file formats.
+
+	FORMAT             = "format"
+	FORMAT_BINARY_FILE = "binaryfile"
+	FORMAT_BINARY_XML  = "binaryxml"
+	FORMAT_HEX         = "hex"
+	FORMAT_HEX_PARSED  = "hexparsed"
+	FORMAT_STRING      = "string"
 )
 
 type Tee struct {
@@ -32,6 +63,7 @@ type Tee struct {
 	PassThru   bool
 }
 
+// Make a timestampped "horizontal rule" to separate output into groups.
 func horizontalRule(title string) string {
 	now := time.Now().String()
 	newTitle := fmt.Sprintf("%s %s", now, title)
@@ -55,7 +87,7 @@ func loadConfig(args map[string]interface{}) {
 		viper.AddConfigPath(configPathParameter.(string))
 	}
 
-	// Other paths in precedence order.
+	// Other paths in precedence order.  Order is important.
 
 	viper.AddConfigPath(".")
 	viper.AddConfigPath("$HOME/go/src/github.com/docktermj/go-proxy-tee/")
@@ -80,18 +112,107 @@ func loadConfig(args map[string]interface{}) {
 	if formatParameter != nil {
 		var format string
 		switch strings.ToLower(formatParameter.(string)) {
-		case FORMAT_STRING:
-			format = FORMAT_STRING
-		case FORMAT_HEX:
-			format = FORMAT_HEX
+		case FORMAT_BINARY_FILE:
+			format = FORMAT_BINARY_FILE
 		case FORMAT_BINARY_XML:
 			format = FORMAT_BINARY_XML
+		case FORMAT_HEX:
+			format = FORMAT_HEX
+		case FORMAT_HEX_PARSED:
+			format = FORMAT_HEX_PARSED
+		case FORMAT_STRING:
+			format = FORMAT_STRING
 		default:
 			format = FORMAT_STRING
 		}
 		viper.Set(FORMAT, format)
 	}
+}
 
+// Pretty-print XML.
+func formatXML(data []byte) ([]byte, error) {
+	b := &bytes.Buffer{}
+	decoder := xml.NewDecoder(bytes.NewReader(data))
+	encoder := xml.NewEncoder(b)
+	encoder.Indent("", "   ")
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			encoder.Flush()
+			return b.Bytes(), nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		err = encoder.EncodeToken(token)
+		if err != nil {
+			return nil, err
+		}
+	}
+}
+
+func hexParseSplit(message []byte) []byte {
+
+	reader := bytes.NewReader(message)
+	splitLength := uint32(len(message))
+
+	// Read token.
+
+	var token uint8
+	if err := binary.Read(reader, binary.BigEndian, &token); err != nil {
+		return message
+	}
+
+	// Based on the token, determine how to find a split.
+
+	switch token {
+	case BINARY_XML_START:
+		var messageLength uint32
+		if err := binary.Read(reader, binary.BigEndian, &messageLength); err != nil {
+			return message
+		}
+		splitLength = messageLength + BINARY_XML_LENGTHS
+	default:
+		return message
+	}
+
+	return message[:splitLength]
+
+}
+
+func hexParse(message []byte) string {
+	result := ""
+	offset := 0
+	for offset < len(message) {
+		slice := hexParseSplit(message[offset:])
+		result = fmt.Sprintf("%s\n%s", result, hex.Dump(slice))
+		offset += len(slice)
+	}
+	return result
+}
+
+func binaryxmlParse(message []byte) string {
+	result := hex.Dump(message)
+	reader := bytes.NewReader(message)
+	var param uint8
+	xmlBuffer := make([]byte, 4096)
+
+	for reader.Len() > 0 {
+
+		err := binaryxml.ReadMessage(reader, &param, &xmlBuffer)
+		if err != nil {
+			fmt.Printf("binaryxml.ReadMessage() failed. Err: %+v\n", err)
+		}
+		binaryXmlString, err := binaryxml.ToXML(xmlBuffer)
+		if err != nil {
+			fmt.Printf("binaryxml.ToXML() failed. Err: %+v\n", err)
+		}
+		if len(binaryXmlString) > 0 {
+			formattedXML, _ := formatXML([]byte(binaryXmlString))
+			result = fmt.Sprintf("%s\n%s", result, formattedXML)
+		}
+	}
+	return result
 }
 
 // One-way proxy from inbound (tee) to outbound.
@@ -116,30 +237,28 @@ func proxy(ctx context.Context, tee Tee, outbound net.Conn, prefix string) {
 
 		var outString string
 		switch viper.Get(FORMAT) {
-		case FORMAT_STRING:
-			outString = string(message)
+		case FORMAT_BINARY_FILE:
+			outString = ""
+		case FORMAT_BINARY_XML:
+			outString = binaryxmlParse(message)
 		case FORMAT_HEX:
 			outString = hex.Dump(message)
-		case FORMAT_BINARY_XML:
-			reader := bytes.NewReader(message)
-			var param uint8
-			xmlBuffer := make([]byte, 4096)
-			err := binaryxml.ReadMessage(reader, &param, &xmlBuffer)
-			if err != nil {
-				fmt.Printf("binaryxml.ReadMessage() failed. Err: %+v\n", err)
-			}
-			outString, err = binaryxml.ToXML(xmlBuffer)
-			if err != nil {
-				fmt.Printf("binaryxml.ToXML() failed. Err: %+v\n", err)
-			}
+		case FORMAT_HEX_PARSED:
+			outString = hexParse(message)
+		case FORMAT_STRING:
+			outString = string(message)
 		default:
 			outString = string(message)
 		}
 
 		// Log message to file.
 
-		outline := fmt.Sprintf("%s\n%s\n\n", horizontalRule(prefix), outString)
-		_, _ = tee.File.WriteString(outline)
+		if len(outString) > 0 {
+			outline := fmt.Sprintf("%s\n%s\n\n", horizontalRule(prefix), outString)
+			_, _ = tee.File.WriteString(outline)
+		} else {
+			_, _ = tee.File.Write(message)
+		}
 
 		// If PassThru, write to outbound network connection.
 
@@ -154,7 +273,7 @@ func proxy(ctx context.Context, tee Tee, outbound net.Conn, prefix string) {
 }
 
 // One-way proxy from inbound to multiple outbounds via 'tees'
-func proxyTee(ctx context.Context, inbound net.Conn, tees []Tee, prefix string) {
+func proxyTee(ctx context.Context, inbound net.Conn, tees []Tee, prefix string, inboundFile *os.File) {
 	byteBuffer := make([]byte, 4096)
 
 	// Read-write loop.
@@ -174,22 +293,17 @@ func proxyTee(ctx context.Context, inbound net.Conn, tees []Tee, prefix string) 
 
 		var outString string
 		switch viper.Get(FORMAT) {
-		case FORMAT_STRING:
-			outString = string(message)
+		case FORMAT_BINARY_FILE:
+			outString = ""
+			inboundFile.Write(message)
+		case FORMAT_BINARY_XML:
+			outString = binaryxmlParse(message)
 		case FORMAT_HEX:
 			outString = hex.Dump(message)
-		case FORMAT_BINARY_XML:
-			reader := bytes.NewReader(message)
-			var param uint8
-			xmlBuffer := make([]byte, 4096)
-			err := binaryxml.ReadMessage(reader, &param, &xmlBuffer)
-			if err != nil {
-				fmt.Printf("binaryxml.ReadMessage() failed. Err: %+v\n", err)
-			}
-			outString, err = binaryxml.ToXML(xmlBuffer)
-			if err != nil {
-				fmt.Printf("binaryxml.ToXML() failed. Err: %+v\n", err)
-			}
+		case FORMAT_HEX_PARSED:
+			outString = hexParse(message)
+		case FORMAT_STRING:
+			outString = string(message)
 		default:
 			outString = string(message)
 		}
@@ -204,7 +318,9 @@ func proxyTee(ctx context.Context, inbound net.Conn, tees []Tee, prefix string) 
 
 			// Log message to tee's file.
 
-			_, _ = tee.File.WriteString(outline)
+			if len(outString) > 0 {
+				_, _ = tee.File.WriteString(outline)
+			}
 
 			// Write to tee's outbound network connection.
 
@@ -232,7 +348,7 @@ Options:
 
 Where:
    configuration_path   Example: '/path/to/configuration'
-   format               Example: 'string', 'hex', 'binaryxml'  Default: string.
+   format               Example: 'string', 'hex', 'binaryxml', 'hexbinaryxml'  Default: string.
 `
 
 	// DocOpt processing.
@@ -244,6 +360,7 @@ Where:
 	loadConfig(args)
 	inboundNetwork := viper.GetString("inbound.network")
 	inboundAddress := viper.GetString("inbound.address")
+	inboundOutput := viper.GetString("inbound.output")
 	outboundNetwork := viper.GetString("outbound.network")
 	outboundAddress := viper.GetString("outbound.address")
 	outboundOutput := viper.GetString("outbound.output")
@@ -253,7 +370,7 @@ Where:
 	// Debugging information.
 
 	if isDebug {
-		log.Printf("Listening on '%s' network with address '%s'\n", inboundNetwork, inboundAddress)
+		log.Printf("Listening on '%s' network with address '%s' into file '%s'\n", inboundNetwork, inboundAddress, inboundOutput)
 		log.Printf("Communicating with '%s' network with address '%s' into file '%s'\n", outboundNetwork, outboundAddress, outboundOutput)
 		teeDefinitions := viper.GetStringMap("tee")
 		for key, _ := range teeDefinitions {
@@ -288,6 +405,12 @@ Where:
 		listener.Close()
 		os.Exit(0)
 	}(inboundListener, sigc)
+
+	inboundFile, err := os.OpenFile(inboundOutput, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
+	if err != nil {
+		panic(err)
+	}
+	defer inboundFile.Close()
 
 	// As a server, Read and Echo loop.
 
@@ -369,7 +492,7 @@ Where:
 
 		// Asynchronously handle bi-directional traffic.
 
-		go proxyTee(ctx, inboundConnection, tees, "Client request")
+		go proxyTee(ctx, inboundConnection, tees, "Client request", inboundFile)
 		for _, tee := range tees {
 			go proxy(ctx, tee, inboundConnection, "Server response")
 		}

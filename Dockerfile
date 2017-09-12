@@ -63,6 +63,7 @@ RUN go get github.com/docopt/docopt-go
 RUN go get github.com/spf13/viper
 RUN go get github.com/BixData/binaryxml
 RUN go get github.com/jnewmoyer/xmlpath
+RUN go get github.com/go-xmlfmt/xmlfmt
 
 # Copy local files from the Git repository.
 COPY . ${GOPATH}/src/${GO_PACKAGE}
