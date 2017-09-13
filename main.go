@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"github.com/docktermj/go-proxy-tee/common/runner"
+	"github.com/docktermj/go-proxy-tee/subcommand/binaryxml"
 	"github.com/docktermj/go-proxy-tee/subcommand/net"
 	"github.com/docopt/docopt-go"
 )
@@ -48,7 +49,8 @@ See 'go-proxy-tee <command> --help' for more information on a specific command.
 	// Reference: http://stackoverflow.com/questions/6769020/go-map-of-functions
 
 	functions := map[string]interface{}{
-		"net": net.Command,
+		"binaryxml": binaryxml.Command,
+		"net":       net.Command,
 	}
 
 	runner.Run(argv, functions, usage)

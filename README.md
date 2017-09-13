@@ -30,6 +30,7 @@ Modify `go-proxy-tee.json` key/values:
 - **inbound:** Communication from client to `go-proxy-tee` 
    - **network:** Type of network. Values: "tcp", "unix"
    - **address:** Address for network-type.
+   - **output:** File to send traffic from client when using `--format binaryfile`
 - **outbound:** Communication from `go-proxy-tee` to primary server
    - **network:** Type of network. Values: "tcp", "unix"
    - **address:** Address for network-type.
@@ -42,10 +43,34 @@ Modify `go-proxy-tee.json` key/values:
       - **output:** File to send captured network traffic
    - Responses from these servers will not be transmitted to the client.
 
+#### Formats
+
+##### hex
+
+A format similar to what is seen in `hexdump -C /path/to/file.out`
+
+##### binaryfile
+
+This output is the binary stream sent by either the client or by a server.
+This format difders from the other formats because each output file represents 
+bytes sent by the client or by servers, but not both.
+Other formats show both the client and server interaction.
+The file can be formatted into hex by running `hexdump -C /path/to/outputfile.txt`.
+
+##### binaryxml
+
+This format is an attempt to parse the network traffic into the Binary XML format.
+
 ### Invocation
 
 ```console
 go-proxy-tee net
+```
+
+To transform `--format binaryxml` output to XML, run:
+
+```console
+go-proxy-tee binaryxml
 ```
 
 ## Development

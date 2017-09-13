@@ -37,7 +37,7 @@ const (
 		BINARY_XML_LENGTH_END_TOKEN +
 		BINARY_XML_LENGTH_CRC
 
-		// Sentinals in XML.
+	// Sentinals in XML.
 
 	BINARY_XML_START        uint8 = 121
 	BINARY_XML_TABLE_BEGIN  uint8 = 124
