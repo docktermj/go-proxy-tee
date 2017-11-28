@@ -6,7 +6,7 @@ DOCKER_CONTAINER_NAME := $(PROGRAM_NAME)
 DOCKER_IMAGE_NAME := local/$(PROGRAM_NAME)
 BUILD_VERSION := $(shell git describe --always --tags --abbrev=0 --dirty)
 BUILD_TAG := $(shell git describe --always --tags --abbrev=0)
-BUILD_ITERATION := $(shell git log $(BUILD_TAG)..HEAD --oneline | wc -l)
+BUILD_ITERATION := $(shell git log $(BUILD_TAG)..HEAD --oneline | wc -l | sed -e 's/^[ \t]*//')
 
 
 # The first "make" target runs as default.
