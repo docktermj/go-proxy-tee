@@ -1,55 +1,36 @@
-FROM centos:7.1.1503
+FROM centos:7
 
-ENV REFRESHED_AT 2017-06-03
+ENV REFRESHED_AT 2017-11-28
 
 ARG PROGRAM_NAME="unknown"
 ARG BUILD_VERSION=0.0.0
 ARG BUILD_ITERATION=0
 
-# --- YUM installs ------------------------------------------------------------
-
-# Avoid "Error: libselinux conflicts with fakesystemd-1-17.el7.centos.noarch"
-RUN yum -y swap fakesystemd systemd && \
-    yum -y install systemd-devel
-
-RUN yum -y update
-
-# --- Install Go --------------------------------------------------------------
-
-ENV GO_VERSION=1.8.3
-
-# Install dependencies.
-RUN yum -y install \
-    git \
-    tar \
-    wget
-
-# Install "go".
-RUN wget https://storage.googleapis.com/golang/go${GO_VERSION}.linux-amd64.tar.gz && \
-    tar -C /usr/local/ -xzf go${GO_VERSION}.linux-amd64.tar.gz
-
-# --- Install Ruby 2.4.0 ------------------------------------------------------
-
 # Install dependencies.
 RUN yum -y install \
     curl \
     gcc \
+    git \
     make \
     rpm-build \
     ruby-devel \
+    rubygems \
+    tar \
     which
 
-# Install Ruby Version Manager (RVM)
-RUN gpg --keyserver hkp://keys.gnupg.net --recv-keys 409B6B1796C275462A1703113804BB82D39DC0E3
-RUN curl -L get.rvm.io | bash -s stable
+# --- Install Go --------------------------------------------------------------
 
-# Install Ruby 2.4.0
-ENV PATH /usr/local/rvm/gems/ruby-2.4.0/bin:/usr/local/rvm/gems/ruby-2.4.0@global/bin:/usr/local/rvm/rubies/ruby-2.4.0/bin:/usr/local/rvm/bin:$PATH
-RUN rvm install 2.4.0
+ENV GO_VERSION=1.8.3
+ENV GO_TGZ=go${GO_VERSION}.linux-amd64.tar.gz
+ENV GO_URL=https://storage.googleapis.com/golang/${GO_TGZ}
+
+# Install "go".
+RUN curl -o ${GO_TGZ} ${GO_URL} && \
+    tar -C /usr/local/ -xzf ${GO_TGZ}
 
 # --- Install Effing Package Manager (FPM) ------------------------------------
 
-RUN gem install fpm --version 1.8.1
+RUN gem install --no-ri --no-rdoc fpm
 
 # --- Compile go program ------------------------------------------------------
 
@@ -59,11 +40,12 @@ ENV PATH="${PATH}:/usr/local/go/bin:${GOPATH}/bin"
 ENV GO_PACKAGE="github.com/docktermj/${PROGRAM_NAME}"
 
 # Install dependencies.
-RUN go get github.com/docopt/docopt-go
-RUN go get github.com/spf13/viper
-RUN go get github.com/BixData/binaryxml
-RUN go get github.com/jnewmoyer/xmlpath
-RUN go get github.com/go-xmlfmt/xmlfmt
+RUN go get \
+    github.com/docopt/docopt-go \
+    github.com/spf13/viper \
+    github.com/BixData/binaryxml \
+    github.com/jnewmoyer/xmlpath \
+    github.com/go-xmlfmt/xmlfmt
 
 # Copy local files from the Git repository.
 COPY . ${GOPATH}/src/${GO_PACKAGE}
