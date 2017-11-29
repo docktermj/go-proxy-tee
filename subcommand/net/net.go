@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/BixData/binaryxml"
+	"github.com/BixData/binaryxml/messages"
 	"github.com/docopt/docopt-go"
 	"github.com/spf13/viper"
 )
@@ -199,7 +200,7 @@ func binaryxmlParse(message []byte) string {
 
 	for reader.Len() > 0 {
 
-		err := binaryxml.ReadMessage(reader, &param, &xmlBuffer)
+		err := binaryxml_messages.ReadMessage(reader, &param, &xmlBuffer)
 		if err != nil {
 			fmt.Printf("binaryxml.ReadMessage() failed. Err: %+v\n", err)
 		}
