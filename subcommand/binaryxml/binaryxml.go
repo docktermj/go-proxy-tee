@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"github.com/BixData/binaryxml"
+	"github.com/BixData/binaryxml/messages"
 	"github.com/docopt/docopt-go"
 	"github.com/spf13/viper"
 )
@@ -109,7 +110,7 @@ func formatBinaryXml(inputFileName string) {
 		currentOffset := maxReaderLength - reader.Len()
 		//		fmt.Printf(">>> Offset: %X\n", currentOffset)
 
-		err := binaryxml.ReadMessage(reader, &param, &xmlBuffer)
+		err := binaryxml_messages.ReadMessage(reader, &param, &xmlBuffer)
 		if err != nil {
 			fmt.Printf("binaryxml.ReadMessage() failed. Err: %+v\n", err)
 			badOffset := currentOffset - 1
