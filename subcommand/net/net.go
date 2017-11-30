@@ -55,13 +55,27 @@ const (
 	FORMAT_HEX         = "hex"
 	FORMAT_HEX_PARSED  = "hexparsed"
 	FORMAT_STRING      = "string"
+
+	BUFFER_LENGTH = 1024 * 16
 )
 
 type Tee struct {
+	Address    string
 	Connection net.Conn
 	File       *os.File
 	Id         string
+	Network    string
+	Output     string
 	PassThru   bool
+}
+
+type Inbound struct {
+	Address    string
+	Connection net.Conn
+	File       *os.File
+	Listener   net.Listener
+	Network    string
+	Output     string
 }
 
 // Make a timestampped "horizontal rule" to separate output into groups.
@@ -172,7 +186,10 @@ func hexParseSplit(message []byte) []byte {
 		if err := binary.Read(reader, binary.BigEndian, &messageLength); err != nil {
 			return message
 		}
-		splitLength = messageLength + BINARY_XML_LENGTHS
+		finalLength := messageLength + BINARY_XML_LENGTHS
+		if finalLength < splitLength {
+			splitLength = finalLength
+		}
 	default:
 		return message
 	}
@@ -194,32 +211,125 @@ func hexParse(message []byte) string {
 
 func binaryxmlParse(message []byte) string {
 	result := hex.Dump(message)
-	reader := bytes.NewReader(message)
 	var param uint8
-	xmlBuffer := make([]byte, 4096)
+	xmlBuffer := make([]byte, BUFFER_LENGTH)
+	offset := 0
 
-	for reader.Len() > 0 {
-
-		err := binaryxml_messages.ReadMessage(reader, &param, &xmlBuffer)
-		if err != nil {
-			fmt.Printf("binaryxml.ReadMessage() failed. Err: %+v\n", err)
-		}
-		binaryXmlString, err := binaryxml.ToXML(xmlBuffer)
-		if err != nil {
-			fmt.Printf("binaryxml.ToXML() failed. Err: %+v\n", err)
-		}
-		if len(binaryXmlString) > 0 {
-			formattedXML, _ := formatXML([]byte(binaryXmlString))
-			result = fmt.Sprintf("%s\n%s", result, formattedXML)
+	for offset < len(message) {
+		switch message[offset] {
+		case BINARY_XML_START:
+			reader := bytes.NewReader(message[offset:])
+			readerOriginalLength := reader.Len()
+			err := binaryxml_messages.ReadMessage(reader, &param, &xmlBuffer)
+			if err != nil {
+				log.Printf("binaryxml_messages.ReadMessage() failed. Err: %+v\n", err)
+				break
+			}
+			readerFinalLength := reader.Len()
+			binaryXmlString, err := binaryxml.ToXML(xmlBuffer)
+			if err != nil {
+				log.Printf("binaryxml.ToXML() failed. Err: %+v\n", err)
+				break
+			}
+			if len(binaryXmlString) > 0 {
+				formattedXML, _ := formatXML([]byte(binaryXmlString))
+				result = fmt.Sprintf("%s\n%s", result, formattedXML)
+			}
+			offset = offset + (readerOriginalLength - readerFinalLength)
+		default:
+			offset = len(message)
 		}
 	}
 	return result
 }
 
+// Open a file for writing.
+func openFile(ctx context.Context, fileName string) *os.File {
+	file, err := os.OpenFile(fileName, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
+	if err != nil {
+		panic(err)
+	}
+	return file
+}
+
+// Convenience method for "Inbound" object.
+func openInputFile(ctx context.Context, inbound *Inbound) {
+	inbound.File = openFile(ctx, inbound.Output)
+}
+
+// Convenience method for "Tee" object.
+func openOutputFile(ctx context.Context, tee *Tee) {
+	tee.File = openFile(ctx, tee.Output)
+}
+
+// As a server, listen on a port.
+func listen(ctx context.Context, inbound *Inbound) {
+
+	if inbound.Connection != nil {
+		inbound.Connection.Close()
+	}
+
+	// Inbound listener.  net.Listen creates a server.
+
+	inboundListener, err := net.Listen(inbound.Network, inbound.Address)
+	if err != nil {
+		log.Fatal("Listen error: ", err)
+	}
+
+	// Configure listener to exit when program ends.
+
+	sigc := make(chan os.Signal, 1)
+	signal.Notify(sigc, os.Interrupt, syscall.SIGTERM)
+	go func(listener net.Listener, c chan os.Signal) {
+		sig := <-c
+		log.Printf("Caught signal %s: shutting down.\n", sig)
+		listener.Close()
+		os.Exit(0)
+	}(inboundListener, sigc)
+
+	inbound.Listener = inboundListener
+}
+
+// As a server, accept a connection request.
+// This is a blocking function.   It waits until client makes a request.
+func accept(ctx context.Context, inbound *Inbound) {
+	isDebug := viper.GetBool("debug")
+
+	inboundConnection, err := inbound.Listener.Accept()
+	if err != nil {
+		log.Fatalf("inbound.Listener.Accept() failed. Err: %+v\n", err)
+	}
+	if isDebug {
+		log.Println("Accepted inbound connection.")
+	}
+	inbound.Connection = inboundConnection
+}
+
+// As a client, connect to a service.
+func connect(ctx context.Context, tee *Tee) {
+	if tee.Connection != nil {
+		tee.Connection.Close()
+	}
+	teeConnection, err := net.Dial(tee.Network, tee.Address)
+	if err != nil {
+		log.Fatal("net.Dial error", err)
+	}
+	tee.Connection = teeConnection
+}
+
+// Append a Tee to a list of Tees.
+// Also, open the output file and connect to service.
+func appendTee(ctx context.Context, tees []Tee, tee Tee) []Tee {
+	openOutputFile(ctx, &tee)
+	connect(ctx, &tee)
+	return append(tees, tee)
+}
+
 // One-way proxy from inbound (tee) to outbound.
 // 'prefix' and network message are written to 'outFile'.
-func proxy(ctx context.Context, tee Tee, outbound net.Conn, prefix string) {
-	byteBuffer := make([]byte, 4096)
+func proxy(ctx context.Context, tee Tee, outbound Inbound, prefix string) {
+	isDebug := viper.GetBool("debug")
+	byteBuffer := make([]byte, BUFFER_LENGTH)
 
 	// Read-write loop.
 
@@ -229,10 +339,12 @@ func proxy(ctx context.Context, tee Tee, outbound net.Conn, prefix string) {
 
 		numberOfBytesRead, err := tee.Connection.Read(byteBuffer)
 		if err != nil {
-			log.Println("Proxy Read return")
+			log.Printf("tee.Connection.Read(...) failed. Err: %+v\n", err)
 			return
 		}
-		message := byteBuffer[0:numberOfBytesRead]
+
+		message := make([]byte, numberOfBytesRead)
+		copy(message, byteBuffer[0:numberOfBytesRead])
 
 		// Construct output string for logging.
 
@@ -258,15 +370,18 @@ func proxy(ctx context.Context, tee Tee, outbound net.Conn, prefix string) {
 			outline := fmt.Sprintf("%s\n%s\n\n", horizontalRule(prefix), outString)
 			_, _ = tee.File.WriteString(outline)
 		} else {
-			_, _ = tee.File.Write(message)
+			_, _ = tee.File.Write(byteBuffer[0:numberOfBytesRead])
 		}
 
 		// If PassThru, write to outbound network connection.
 
 		if tee.PassThru {
-			_, err := outbound.Write([]byte(message))
+			if isDebug {
+				log.Printf("Bytes returned by proxy: %d\n", numberOfBytesRead)
+			}
+			_, err := outbound.Connection.Write(byteBuffer[0:numberOfBytesRead])
 			if err != nil {
-				log.Println("Proxy Write return")
+				log.Printf("outbound.Write() failed. Err: %+v\n", err)
 				return
 			}
 		}
@@ -274,8 +389,9 @@ func proxy(ctx context.Context, tee Tee, outbound net.Conn, prefix string) {
 }
 
 // One-way proxy from inbound to multiple outbounds via 'tees'
-func proxyTee(ctx context.Context, inbound net.Conn, tees []Tee, prefix string, inboundFile *os.File) {
-	byteBuffer := make([]byte, 4096)
+func proxyTee(ctx context.Context, inbound Inbound, tees []Tee, prefix string) {
+	isDebug := viper.GetBool("debug")
+	byteBuffer := make([]byte, BUFFER_LENGTH)
 
 	// Read-write loop.
 
@@ -283,12 +399,18 @@ func proxyTee(ctx context.Context, inbound net.Conn, tees []Tee, prefix string, 
 
 		// Read the inbound network connection.
 
-		numberOfBytesRead, err := inbound.Read(byteBuffer)
+		numberOfBytesRead, err := inbound.Connection.Read(byteBuffer)
 		if err != nil {
-			log.Println("Proxy Read return")
+			log.Printf("inbound.Connection.Read() failed. Err: %+v\n", err)
 			return
 		}
-		message := byteBuffer[0:numberOfBytesRead]
+
+		if isDebug {
+			log.Printf("Bytes sent to proxy: %d\n", numberOfBytesRead)
+		}
+
+		message := make([]byte, numberOfBytesRead)
+		copy(message, byteBuffer[0:numberOfBytesRead])
 
 		// Construct output string for logging.
 
@@ -296,7 +418,7 @@ func proxyTee(ctx context.Context, inbound net.Conn, tees []Tee, prefix string, 
 		switch viper.Get(FORMAT) {
 		case FORMAT_BINARY_FILE:
 			outString = ""
-			inboundFile.Write(message)
+			inbound.File.Write(message)
 		case FORMAT_BINARY_XML:
 			outString = binaryxmlParse(message)
 		case FORMAT_HEX:
@@ -325,9 +447,9 @@ func proxyTee(ctx context.Context, inbound net.Conn, tees []Tee, prefix string, 
 
 			// Write to tee's outbound network connection.
 
-			_, err := tee.Connection.Write([]byte(message))
+			_, err := tee.Connection.Write(byteBuffer[0:numberOfBytesRead])
 			if err != nil {
-				log.Println("Proxy Write return")
+				log.Printf("tee.Connection.Write() failed. Err: %+v\n", err)
 				return
 			}
 		}
@@ -349,8 +471,13 @@ Options:
 
 Where:
    configuration_path   Example: '/path/to/configuration'
-   format               Example: 'string', 'hex', 'binaryxml', 'hexbinaryxml'  Default: string.
+   format               Values: 'binaryfile', 'binaryxml', 'hex', 'hexparsed', and default value: 'string'.
 `
+
+	// Create context.
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	// DocOpt processing.
 
@@ -384,118 +511,62 @@ Where:
 		log.Printf("Formatting output as '%s'\n", viper.GetString(FORMAT))
 	}
 
-	// Create context.
+	// Initialize inbound listener.
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Inbound listener.  net.Listen creates a server.
-
-	inboundListener, err := net.Listen(inboundNetwork, inboundAddress)
-	if err != nil {
-		log.Fatal("Listen error: ", err)
+	inbound := Inbound{
+		Address: inboundAddress,
+		Network: inboundNetwork,
+		Output:  inboundOutput,
 	}
-
-	// Configure listener to exit when program ends.
-
-	sigc := make(chan os.Signal, 1)
-	signal.Notify(sigc, os.Interrupt, syscall.SIGTERM)
-	go func(listener net.Listener, c chan os.Signal) {
-		sig := <-c
-		log.Printf("Caught signal %s: shutting down.", sig)
-		listener.Close()
-		os.Exit(0)
-	}(inboundListener, sigc)
-
-	inboundFile, err := os.OpenFile(inboundOutput, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
-	if err != nil {
-		panic(err)
-	}
-	defer inboundFile.Close()
+	listen(ctx, &inbound)
+	openInputFile(ctx, &inbound)
+	defer inbound.File.Close()
 
 	// As a server, Read and Echo loop.
 
 	for {
 		tees := []Tee{}
 
-		// As a server, listen for a connection request.
+		// As a server, listen for a connection request. This is blocking.
 
-		inboundConnection, err := inboundListener.Accept()
-		if err != nil {
-			log.Fatal("Accept error: ", err)
-		}
-		if isDebug {
-			log.Println("Accepted inbound connection.")
-		}
+		accept(ctx, &inbound)
 
-		// Create output file.
+		// Create a "per-connection" context.
 
-		outboundFile, err := os.OpenFile(outboundOutput, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
-		if err != nil {
-			panic(err)
-		}
-		defer outboundFile.Close()
-
-		// Create a network connection.  net.Dial creates a client.
-
-		outboundConnection, err := net.Dial(outboundNetwork, outboundAddress)
-		if err != nil {
-			log.Fatal("Dial error", err)
-		}
-		defer outboundConnection.Close()
+		connectionCtx, connectionCtxCancel := context.WithCancel(ctx)
+		defer connectionCtxCancel()
 
 		// Add "outbound" to tees with PassThru=true.
 
 		tee := Tee{
-			Connection: outboundConnection,
-			File:       outboundFile,
-			Id:         "outbound",
-			PassThru:   true,
+			Address:  outboundAddress,
+			Id:       "outbound",
+			Network:  outboundNetwork,
+			Output:   outboundOutput,
+			PassThru: true,
 		}
-		tees = append(tees, tee)
+		tees = appendTee(connectionCtx, tees, tee)
 
 		// Add tees from configuration file.
 
 		for key, _ := range teeDefinitions {
-
-			// Get configuration.
-
 			teeDefinition := teeDefinitions[key].(map[string]interface{})
-			teeNetwork := teeDefinition["network"].(string)
-			teeAddress := teeDefinition["address"].(string)
-			teeOutput := teeDefinition["output"].(string)
-
-			// Create output file.
-
-			teeFile, err := os.OpenFile(teeOutput, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
-			if err != nil {
-				panic(err)
-			}
-			defer teeFile.Close()
-
-			// Create a network connection.  net.Dial creates a client.
-
-			teeConnection, err := net.Dial(teeNetwork, teeAddress)
-			if err != nil {
-				log.Fatal("Dial error", err)
-			}
-			defer teeConnection.Close()
-
-			// Add to tees.
-
 			tee := Tee{
-				Connection: teeConnection,
-				File:       teeFile,
-				Id:         key,
+				Address: teeDefinition["address"].(string),
+				Id:      key,
+				Network: teeDefinition["network"].(string),
+				Output:  teeDefinition["output"].(string),
 			}
-			tees = append(tees, tee)
+			tees = appendTee(connectionCtx, tees, tee)
 		}
 
 		// Asynchronously handle bi-directional traffic.
 
-		go proxyTee(ctx, inboundConnection, tees, "Client request", inboundFile)
+		defer inbound.Connection.Close()
+		go proxyTee(connectionCtx, inbound, tees, "Client request")
 		for _, tee := range tees {
-			go proxy(ctx, tee, inboundConnection, "Server response")
+			defer tee.Connection.Close()
+			go proxy(connectionCtx, tee, inbound, "Server response")
 		}
 	}
 }

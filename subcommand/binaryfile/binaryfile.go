@@ -1,4 +1,4 @@
-package binaryxml
+package binaryfile
 
 import (
 	"bytes"
@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"os"
 
 	"github.com/BixData/binaryxml"
@@ -79,24 +80,99 @@ func formatXml(data []byte) ([]byte, error) {
 	}
 }
 
-func formatBinaryXml(inputFileName string) {
+// Read binaryXML and transform to pretty-printed XML.
+func readXml(reader *bytes.Reader, outputFile *os.File) error {
+
+	// Read a "message".
+
 	var param uint8
 	xmlBuffer := make([]byte, 4096)
+	err := binaryxml_messages.ReadMessage(reader, &param, &xmlBuffer)
+	if err != nil {
+		fmt.Printf("binaryxml.ReadMessage() failed. Err: %+v\n", err)
+	}
 
-	// Create input bytes Reader for inputFileName.
+	// Transform binary XML to XML.
+
+	binaryXmlString, err := binaryxml.ToXML(xmlBuffer)
+	if err != nil {
+		fmt.Printf("binaryxml.ToXML() failed. Err: %+v\n", err)
+	}
+
+	// "Pretty print" the XML and write to file.
+
+	if len(binaryXmlString) > 0 {
+		formattedXml, err := formatXml([]byte(binaryXmlString))
+		if err != nil {
+			panic(err)
+		}
+		_, err = outputFile.Write(formattedXml)
+		if err != nil {
+			panic(err)
+		}
+		_, err = outputFile.WriteString("\n\n")
+		if err != nil {
+			panic(err)
+		}
+	}
+	return nil
+}
+
+// Read binary and transform to "hexdump -C ..." format.
+func readHex(reader *bytes.Reader, outputFile *os.File) error {
+	result := new(bytes.Buffer)
+
+	// Loop through reader until BINARY_XML_START is found.
+
+	binaryXmlStart := []byte{BINARY_XML_START}
+	aByte := make([]byte, 1)
+	_, err := reader.Read(aByte)
+	for bytes.Compare(aByte, binaryXmlStart) != 0 {
+		result.WriteByte(aByte[0])
+		_, err := reader.Read(aByte)
+		if err != nil {
+			break
+		}
+	}
+
+	// Back the reader up by 1 byte.
+
+	reader.Seek(-1, 1) //  1 means from current position. https://socketloop.com/references/golang-bytes-reader-seek-function-example
+
+	// Write in "hexdump -C ..." format.
+
+	_, err = outputFile.Write([]byte(hex.Dump(result.Bytes())))
+	if err != nil {
+		panic(err)
+	}
+	_, err = outputFile.WriteString("\n")
+	if err != nil {
+		panic(err)
+	}
+
+	return nil
+}
+
+func formatBinaryXml(inputFileName string) {
+	isDebug := viper.GetBool("debug")
+
+	// Open input file.
 
 	inputFile, err := os.Open(inputFileName)
 	if err != nil {
 		panic(err)
 	}
 	defer inputFile.Close()
+
+	// Read input file contents.
+
 	inputFileBytes, err := ioutil.ReadAll(inputFile)
 	if err != nil {
 		panic(err)
 	}
 	reader := bytes.NewReader(inputFileBytes)
 
-	// Create output.
+	// Create output file.
 
 	outputFileName := fmt.Sprintf("%s.xml", inputFileName)
 	outputFile, err := os.OpenFile(outputFileName, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
@@ -105,50 +181,22 @@ func formatBinaryXml(inputFileName string) {
 	}
 	defer outputFile.Close()
 
+	// Process input file.
+
 	maxReaderLength := reader.Len()
 	for reader.Len() > 0 {
 		currentOffset := maxReaderLength - reader.Len()
-		//		fmt.Printf(">>> Offset: %X\n", currentOffset)
-
-		err := binaryxml_messages.ReadMessage(reader, &param, &xmlBuffer)
-		if err != nil {
-			fmt.Printf("binaryxml.ReadMessage() failed. Err: %+v\n", err)
-			badOffset := currentOffset - 1
-
-			aByte := make([]byte, 1)
-			reader.Seek(int64(badOffset+1), 0) //  0 means from begining of file. https://socketloop.com/references/golang-bytes-reader-seek-function-example
-			binaryXmlStart := []byte{BINARY_XML_START}
-			for bytes.Compare(aByte, binaryXmlStart) != 0 {
-				_, err := reader.Read(aByte)
-				if err != nil {
-					break
-				}
-			}
-			currentOffset := maxReaderLength - reader.Len()
-
-			message := hex.Dump(inputFileBytes[badOffset : currentOffset-1])
-			fmt.Printf("Offset %X:\n%s\n", badOffset, message)
-		}
-		binaryXmlString, err := binaryxml.ToXML(xmlBuffer)
-		if err != nil {
-			fmt.Printf("binaryxml.ToXML() failed. Err: %+v\n", err)
-		}
-		if len(binaryXmlString) > 0 {
-			formattedXml, err := formatXml([]byte(binaryXmlString))
-			if err != nil {
-				panic(err)
-			}
-			_, err = outputFile.Write(formattedXml)
-			if err != nil {
-				panic(err)
-			}
-			_, err = outputFile.WriteString("\n")
-			if err != nil {
-				panic(err)
-			}
+		switch inputFileBytes[currentOffset] {
+		case BINARY_XML_START:
+			readXml(reader, outputFile)
+		default:
+			readHex(reader, outputFile)
 		}
 	}
 
+	if isDebug {
+		log.Printf("Processed %d bytes for '%s'\n", maxReaderLength, outputFileName)
+	}
 }
 
 // Function for the "command pattern".
@@ -156,7 +204,7 @@ func Command(argv []string) {
 
 	usage := `
 Usage:
-    go-proxy-tee binaryxml [options]
+    go-proxy-tee binaryfile [options]
 
 Options:
    -h, --help
@@ -177,8 +225,8 @@ Where:
 
 	// Transform input, output, and tee files.
 
-	//	inboundOutput := viper.GetString("inbound.output")
-	//	formatBinaryXml(inboundOutput)
+	inboundOutput := viper.GetString("inbound.output")
+	formatBinaryXml(inboundOutput)
 
 	outboundOutput := viper.GetString("outbound.output")
 	formatBinaryXml(outboundOutput)
