@@ -203,10 +203,12 @@ func binaryxmlParse(message []byte) string {
 		err := binaryxml_messages.ReadMessage(reader, &param, &xmlBuffer)
 		if err != nil {
 			fmt.Printf("binaryxml.ReadMessage() failed. Err: %+v\n", err)
+			break
 		}
 		binaryXmlString, err := binaryxml.ToXML(xmlBuffer)
 		if err != nil {
 			fmt.Printf("binaryxml.ToXML() failed. Err: %+v\n", err)
+			break
 		}
 		if len(binaryXmlString) > 0 {
 			formattedXML, _ := formatXML([]byte(binaryXmlString))
@@ -349,7 +351,7 @@ Options:
 
 Where:
    configuration_path   Example: '/path/to/configuration'
-   format               Example: 'string', 'hex', 'binaryxml', 'hexbinaryxml'  Default: string.
+   format               Example: 'string', 'hex', 'hexparsed', 'binaryxml', 'binaryfile'  Default: string.
 `
 
 	// DocOpt processing.

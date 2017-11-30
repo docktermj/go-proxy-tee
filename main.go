@@ -27,7 +27,8 @@ Options:
     -h, --help      Show help menu
 
 The commands are:
-    net    Relay through different types of networks
+	net         Relay through different types of networks
+	binaryxml   Formats captured files into binaryxml
 
 See 'go-proxy-tee <command> --help' for more information on a specific command.
 `
