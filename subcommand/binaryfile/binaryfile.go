@@ -94,19 +94,21 @@ func readXml(reader *bytes.Reader, outputFile *os.File) error {
 
 	// Transform binary XML to XML.
 
-	binaryXmlString, err := binaryxml.ToXML(xmlBuffer)
+	xmlString, err := binaryxml.ToXML(xmlBuffer)
 	if err != nil {
 		fmt.Printf("binaryxml.ToXML() failed. Err: %+v\n", err)
 	}
 
 	// "Pretty print" the XML and write to file.
 
-	if len(binaryXmlString) > 0 {
-		formattedXml, err := formatXml([]byte(binaryXmlString))
+	if len(xmlString) > 0 {
+		formattedXml, err := formatXml([]byte(xmlString))
 		if err != nil {
-			panic(err)
+			// no reason to panic, just write unformatted output
+			_, err = outputFile.Write([]byte(xmlString))
+		} else {
+			_, err = outputFile.Write(formattedXml)
 		}
-		_, err = outputFile.Write(formattedXml)
 		if err != nil {
 			panic(err)
 		}
