@@ -10,56 +10,72 @@ A proxy the acts like Linux's `tee` command, but for network traffic.
 
 ### Configuration
 
-Copy 
-[go-proxy-tee.json.sample](https://github.com/docktermj/go-proxy-tee/blob/master/go-proxy-tee.json.sample) 
-to `go-proxy-tee.json` 
+Copy
+[go-proxy-tee.json.sample](https://github.com/docktermj/go-proxy-tee/blob/master/go-proxy-tee.json.sample)
+to `go-proxy-tee.json`
 in one of the following places:
+
 - `./go-proxy-tee.json`  for "directory-specific" invocation
 - `$HOME/.go-proxy-tee/go-proxy-tee.json` for "user-specific" invocation
 - `/etc/go-proxy-tee/go-proxy-tee.json` for "system-specific" invocation
+
 Note: Can be placed in another directory and then use the `--configPath` command-line option.
 
 Modify `go-proxy-tee.json` key/values:
 
 - **debug:** Turn on/off debugging statements.
-   - Values: true / false
-   - Also available via the `--debug` command-line option
+  - Values: true / false
+  - Also available via the `--debug` command-line option
 - **format:** Specify output format for "tee" files.
-   - Values: "string", "hex", "binaryxml".
-   - Also available via the `--format` command-line option
-- **inbound:** Communication from client to `go-proxy-tee` 
-   - **network:** Type of network. Values: "tcp", "unix"
-   - **address:** Address for network-type.
-   - **output:** File to send traffic from client when using `--format binaryfile`
+  - Values: "binaryfile", "binaryxml", "hex", "hexparsed", "string".
+  - Also available via the `--format` command-line option
+- **inbound:** Communication from client to `go-proxy-tee`
+  - **network:** Type of network. Values: "tcp", "unix"
+  - **address:** Address for network-type.
+  - **output:** File to send traffic from client when using `--format binaryfile`
 - **outbound:** Communication from `go-proxy-tee` to primary server
-   - **network:** Type of network. Values: "tcp", "unix"
-   - **address:** Address for network-type.
-   - **output:** File to send captured network traffic
-   - Responses from the primary server will be transmitted to the client.
-- **tee:** List of communications from `go-proxy-tee to additional servers 
-   - **{tee-name}:** - a name of your choosing
-      - **network:** Type of network. Values: "tcp", "unix"
-      - **address:** Address for network-type.
-      - **output:** File to send captured network traffic
-   - Responses from these servers will not be transmitted to the client.
+  - **network:** Type of network. Values: "tcp", "unix"
+  - **address:** Address for network-type.
+  - **output:** File to send captured network traffic
+  - Responses from the primary server will be transmitted to the client.
+- **tee:** List of communications from `go-proxy-tee to additional servers
+  - **{tee-name}:** - a name of your choosing
+    - **network:** Type of network. Values: "tcp", "unix"
+    - **address:** Address for network-type.
+    - **output:** File to send captured network traffic
+  - Responses from these servers will not be transmitted to the client.
 
-#### Formats
+#### Format
+
+The `format` JSON stanza which can be over-ridden by the `--format` commandline option has one of the following values.
+
+##### string
+
+This is the default value.
+The output file captures both request and response.
+A header prefaces each message.
+The binary message is converted to a string.
+...
+
+##### binaryfile
+
+This output is the binary stream sent by either the client or by a server.
+This format differs from the other formats because each output file represents
+bytes sent by the client or by servers, but not both.
+Other formats show both the client and server interaction.
+The output file can be formatted into hex by running `hexdump -C /path/to/outputfile.txt`.
+
+##### binaryxml
+
+This format is an attempt to parse the network traffic into the Binary XML format.
 
 ##### hex
 
 A format similar to what is seen in `hexdump -C /path/to/file.out`
 
-##### binaryfile
+##### hexparsed
 
-This output is the binary stream sent by either the client or by a server.
-This format difders from the other formats because each output file represents 
-bytes sent by the client or by servers, but not both.
-Other formats show both the client and server interaction.
-The file can be formatted into hex by running `hexdump -C /path/to/outputfile.txt`.
-
-##### binaryxml
-
-This format is an attempt to parse the network traffic into the Binary XML format.
+...
 
 ### Invocation
 
@@ -144,7 +160,7 @@ sudo rpm -ivh go-proxy-tee-M.m.P-I.x86_64.rpm
 
 ##### RPM Update
 
-Example: 
+Example:
 
 ```console
 sudo rpm -Uvh go-proxy-tee-M.m.P-I.x86_64.rpm

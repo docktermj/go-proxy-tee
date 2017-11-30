@@ -5,7 +5,7 @@ import (
 	"log"
 
 	"github.com/docktermj/go-proxy-tee/common/runner"
-	"github.com/docktermj/go-proxy-tee/subcommand/binaryxml"
+	"github.com/docktermj/go-proxy-tee/subcommand/binaryfile"
 	"github.com/docktermj/go-proxy-tee/subcommand/net"
 	"github.com/docopt/docopt-go"
 )
@@ -27,7 +27,8 @@ Options:
     -h, --help      Show help menu
 
 The commands are:
-    net    Relay through different types of networks
+    net         Relay through different types of networks
+    binaryfile  Transform 'go-proxy-tee net --format=binaryfile' output to XML
 
 See 'go-proxy-tee <command> --help' for more information on a specific command.
 `
@@ -49,8 +50,8 @@ See 'go-proxy-tee <command> --help' for more information on a specific command.
 	// Reference: http://stackoverflow.com/questions/6769020/go-map-of-functions
 
 	functions := map[string]interface{}{
-		"binaryxml": binaryxml.Command,
-		"net":       net.Command,
+		"binaryfile": binaryfile.Command,
+		"net":        net.Command,
 	}
 
 	runner.Run(argv, functions, usage)
