@@ -220,7 +220,7 @@ func binaryxmlParse(message []byte) string {
 		case BINARY_XML_START:
 			reader := bytes.NewReader(message[offset:])
 			readerOriginalLength := reader.Len()
-			err := binaryxml_messages.ReadMessage(reader, &param, &xmlBuffer)
+			err := messages.ReadMessage(reader, &param, &xmlBuffer)
 			if err != nil {
 				log.Printf("binaryxml_messages.ReadMessage() failed. Err: %+v\n", err)
 				break
