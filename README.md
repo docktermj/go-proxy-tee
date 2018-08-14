@@ -1,5 +1,11 @@
 # go-proxy-tee
 
+## Warning
+
+This is exemplar code only.  It does not build because of unmet dependencies.
+
+## Summary
+
 Build `go-proxy-tee-M.m.P-I.x86_64.rpm`
 and   `go-proxy-tee_M.m.P-I_amd64.deb`
 where "M.m.P-I" is Major.minor.Patch-Iteration.
