@@ -87,7 +87,7 @@ func readXml(reader *bytes.Reader, outputFile *os.File) error {
 
 	var param uint8
 	xmlBuffer := make([]byte, 4096)
-	err := binaryxml_messages.ReadMessage(reader, &param, &xmlBuffer)
+	err := messages.ReadMessage(reader, &param, &xmlBuffer)
 	if err != nil {
 		fmt.Printf("binaryxml.ReadMessage() failed. Err: %+v\n", err)
 	}
